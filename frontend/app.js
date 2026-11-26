@@ -1,4 +1,4 @@
-const API_BASE = (import.meta.env.VITE_API_URL || "").replace(/\/api\/?$/, "");
+const API_BASE = (import.meta.env.VITE_API_URL || "https://digital-campus-iv6k.onrender.com").replace(/\/api\/?$/, "");
 
 const state = {
   user: null,
