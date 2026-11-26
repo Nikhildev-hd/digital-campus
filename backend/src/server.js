@@ -10,10 +10,39 @@ const { pool, dbConfig } = require("./db");
 
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
+const isProduction = process.env.NODE_ENV === "production";
 
-// Security headers (CSP configured to allow local frontend scripts/styles)
+const allowedOrigins = [
+  "http://localhost:5173",
+  "http://localhost:3000",
+  "https://digital-campus-sooty.vercel.app",
+  process.env.FRONTEND_URL,
+].filter(Boolean);
+
+// Required behind Render's HTTPS reverse proxy for secure cross-site cookies
+app.set("trust proxy", 1);
+
+// Cross-origin support for Vercel -> Render with credentials
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  if (origin && (allowedOrigins.includes(origin) || origin.endsWith(".vercel.app"))) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader("Vary", "Origin");
+  }
+  res.setHeader("Access-Control-Allow-Credentials", "true");
+  res.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+
+  if (req.method === "OPTIONS") {
+    return res.sendStatus(204);
+  }
+  return next();
+});
+
+// Security headers
 app.use(
   helmet({
+    crossOriginResourcePolicy: { policy: "cross-origin" },
     contentSecurityPolicy: {
       directives: {
         defaultSrc: ["'self'"],
@@ -45,8 +74,8 @@ app.use(
     saveUninitialized: false,
     cookie: {
       httpOnly: true,
-      sameSite: "lax",
-      secure: process.env.NODE_ENV === "production",
+      sameSite: isProduction ? "none" : "lax",
+      secure: isProduction,
       maxAge: 1000 * 60 * 60 * 8,
     },
   })
@@ -115,7 +144,11 @@ app.post("/api/auth/logout", (req, res) => {
     if (err) {
       return res.status(500).json({ error: "Failed to log out." });
     }
-    res.clearCookie("campusconnect.sid");
+    res.clearCookie("campusconnect.sid", {
+      httpOnly: true,
+      sameSite: isProduction ? "none" : "lax",
+      secure: isProduction,
+    });
     return res.json({ message: "Logged out successfully." });
   });
 });
@@ -280,104 +313,4 @@ app.delete("/api/students/:id", requireAdmin, async (req, res) => {
     const id = Number(req.params.id);
     const [result] = await pool.execute("DELETE FROM students WHERE id = ?", [id]);
     if (result.affectedRows === 0) {
-      return res.status(404).json({ error: "Student not found." });
-    }
-    return res.json({ message: "Student deleted successfully." });
-  } catch (err) {
-    console.error("Delete student error:", err);
-    return res.status(500).json({ error: "Failed to delete student." });
-  }
-});
-
-// --- Announcements Routes ---
-app.get("/api/announcements", requireAuth, async (req, res) => {
-  try {
-    const [rows] = await pool.execute(`
-      SELECT a.id, a.title, a.body, a.created_at, u.full_name AS author
-      FROM announcements a
-      JOIN users u ON a.created_by = u.id
-      ORDER BY a.created_at DESC
-    `);
-    return res.json({ announcements: rows });
-  } catch (err) {
-    console.error("List announcements error:", err);
-    return res.status(500).json({ error: "Failed to fetch announcements." });
-  }
-});
-
-app.post("/api/announcements", requireAdmin, async (req, res) => {
-  try {
-    const { title, body } = req.body;
-    if (!title || !body) {
-      return res
-        .status(400)
-        .json({ error: "Announcement title and body are required." });
-    }
-
-    const [result] = await pool.execute(
-      "INSERT INTO announcements (title, body, created_by) VALUES (?, ?, ?)",
-      [title.trim(), body.trim(), req.session.user.id]
-    );
-
-    const [created] = await pool.execute(
-      `SELECT a.id, a.title, a.body, a.created_at, u.full_name AS author
-       FROM announcements a
-       JOIN users u ON a.created_by = u.id
-       WHERE a.id = ?`,
-      [result.insertId]
-    );
-
-    return res.status(201).json({ announcement: created[0] });
-  } catch (err) {
-    console.error("Create announcement error:", err);
-    return res.status(500).json({ error: "Failed to create announcement." });
-  }
-});
-
-// --- Attendance Summary Route ---
-app.get("/api/attendance", requireAuth, async (req, res) => {
-  try {
-    const [rows] = await pool.execute(`
-      SELECT
-        s.id AS student_id,
-        s.full_name,
-        s.student_code,
-        SUM(CASE WHEN a.status = 'Present' THEN 1 ELSE 0 END) AS present_count,
-        SUM(CASE WHEN a.status = 'Absent' THEN 1 ELSE 0 END) AS absent_count,
-        COUNT(a.id) AS total_records
-      FROM students s
-      INNER JOIN attendance a ON a.student_id = s.id
-      GROUP BY s.id, s.full_name, s.student_code
-      ORDER BY s.student_code ASC
-    `);
-
-    const summary = rows.map((r) => {
-      const total = Number(r.total_records || 0);
-      const present = Number(r.present_count || 0);
-      const absent = Number(r.absent_count || 0);
-      return {
-        student_id: r.student_id,
-        full_name: r.full_name,
-        student_code: r.student_code,
-        present,
-        absent,
-        records: total,
-        percentage: total > 0 ? Math.round((present / total) * 100) : 0,
-      };
-    });
-
-    return res.json({ summary });
-  } catch (err) {
-    console.error("Attendance summary error:", err);
-    return res.status(500).json({ error: "Failed to fetch attendance summary." });
-  }
-});
-
-// Fallback to SPA index.html
-app.get("*", (req, res) => {
-  res.sendFile(path.join(frontendDir, "index.html"));
-});
-
-app.listen(PORT, () => {
-  console.log(`CampusConnect server running at http://localhost:${PORT}`);
-});
+      return

@@ -1,3 +1,5 @@
+const API_BASE = (import.meta.env.VITE_API_URL || "").replace(/\/api\/?$/, "");
+
 const state = {
   user: null,
   students: [],
@@ -6,7 +8,9 @@ const state = {
 const el = (id) => document.getElementById(id);
 
 async function api(url, options = {}) {
-  const res = await fetch(url, {
+  const fullUrl = url.startsWith("http") ? url : `${API_BASE}${url}`;
+  const res = await fetch(fullUrl, {
+    credentials: "include",
     headers: { "Content-Type": "application/json", ...(options.headers || {}) },
     ...options,
   });
