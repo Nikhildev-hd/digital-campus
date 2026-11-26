@@ -13,6 +13,6 @@ const dbConfig = {
   queueLimit: 0,
 };
 
-const pool = mysql.createPool(dbConfig);
+ssl: { rejectUnauthorized: false };
 
 module.exports = { pool, dbConfig };
